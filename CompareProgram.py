@@ -1,8 +1,8 @@
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*- #
 TITLE       = 'GPS Log Compare Program for GNET System'
-VERSION     = '1.0.0'
+VERSION     = '1.0.1'
 AUTHOR      = 'So Byung Jun'
-UPDATE      = '2022-6-14'
+UPDATE      = '2022-6-15'
 GIT_LINK    = 'https://github.com/so686so/GPS_LogCompare.git'
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*- #
 
@@ -21,7 +21,6 @@ GIT_LINK    = 'https://github.com/so686so/GPS_LogCompare.git'
 # Standard Library
 # -------------------------------------------------------------------
 import  json
-from msilib.schema import SelfReg
 import  os
 import  sys
 import  shutil
@@ -71,14 +70,14 @@ DUPLICATE_PRIORITY  = FIRST
 # 인코딩 컨버트할 때 변환할 포맷
 CONVERT_ENCODING    = 'utf-8'
 
-# 파일 경로들
+# 기본 파일 경로들
 VIEWER_FILE         = './viewer.txt'
 SERVER_FILE         = './server.txt'
 RESULT_DIR          = CUR_PATH
 RESULT_FILE         = 'Result.txt'
 
 # 매치 체크할 때 검사할 키값 목록
-MATCH_CHECK_LIST    = ['time', 'speed', 'bearing', 'latitude', 'longitude' ]
+MATCH_CHECK_LIST    = [ 'time', 'speed', 'bearing', 'latitude', 'longitude' ]
 UNMATCH_COUNT_LIST  = [ 0 for _ in MATCH_CHECK_LIST ]
 
 # DateTime StringFormat
