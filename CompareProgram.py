@@ -55,11 +55,13 @@ ENCODING_PREPIX         = 'ENC_'
 CUR_PATH                = os.path.dirname('./')
 
 # 인코딩 컨버트할 때 변환할 포맷
-CONVERT_ENCODING    = 'utf-8'
+CONVERT_ENCODING        = 'utf-8'
 
 # UI 창 크기
 WINDOW_WIDTH            = 800
 WINDOW_HEIGHT           = 650
+
+NEED_BRACKET_COUNT      = 2
 
 # Var Define : UI 시작할 때 초기 세팅값이고, UI를 통해 변경 가능
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
@@ -73,7 +75,8 @@ RESULT_DIR          = CUR_PATH
 RESULT_FILE         = 'IOT_GPS_로그값_비교_결과.txt'
 
 # 매치 체크할 때 검사할 키값 목록
-MATCH_CHECK_LIST    = [ 'time', 'speed', 'bearing', 'latitude', 'longitude' ]
+MATCH_CHECK_LIST    = [ 'time', 'speed', 'bearing', 'latitude', 'longitude', 'status' ]
+CHECK_DETAIL_LIST   = [ ['str', 0], ['float', 2], ['int', 0], ['float', 5], ['float', 5], ['str', 0] ]
 UNMATCH_COUNT_LIST  = [ 0 for _ in MATCH_CHECK_LIST ]
 
 # DateTime StringFormat
@@ -122,7 +125,7 @@ class ProgressSignal(QObject):
 # FileChecker : FileCheck 및 인코딩 체크, 인코딩 변환 및 Json Read
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 class FileChecker:
-    def __init__( self, convert_encoding = CONVERT_ENCODING ):
+    def __init__( self, logKeyList=MATCH_CHECK_LIST, convert_encoding=CONVERT_ENCODING ):
         self.__targetFile       = r""
         self.__targetFormat     = None
 
@@ -133,6 +136,7 @@ class FileChecker:
         self.__newCorrectJson   = False
 
         self.__jsonObject       = None
+        self._checkLogKeyList   = logKeyList
 
     # getter & setter
     # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
@@ -296,6 +300,61 @@ class FileChecker:
         return True
 
 
+    def checkFileBrackets(self, srcLineList:list):
+        startBracket    = 0
+        endBracket      = 0
+        startString     = ""
+        endString       = ""
+
+        # 파일 처음과 마지막 10줄을 읽어서 괄호쌍 찾고 갯수 파악하기
+        for eachStr in srcLineList[:10]:
+            startString += str(eachStr).strip()
+        for eachStr in srcLineList[-10:]:
+            endString   += str(eachStr).strip()
+
+        for eachChar in startString:
+            if eachChar == '[':
+                startBracket += 1
+
+        endString = endString[::-1]
+
+        for eachChar in endString:
+            if eachChar == ']':
+                endBracket += 1
+
+
+        if startBracket != NEED_BRACKET_COUNT or endBracket != NEED_BRACKET_COUNT:
+            print("[#] 파일의 괄호가 주어진 형식에 맞지 않아 보정합니다")
+
+            if startBracket != NEED_BRACKET_COUNT:
+                addBracket = '[' * (NEED_BRACKET_COUNT - startBracket)
+                srcLineList.insert(0, addBracket)
+
+            if endBracket != NEED_BRACKET_COUNT:
+                if endString[0] == ',':
+                    srcLineList[-1] = str(srcLineList[-1]).rstrip().replace(',', '')
+                addBracket = ']' * (NEED_BRACKET_COUNT - endBracket)
+                srcLineList.append(addBracket)
+
+            return srcLineList, True
+        
+        return srcLineList, False
+
+
+    def checkJsonDelimiter(self, srcLineList:list):
+        bChanged = False
+        for idx, line in enumerate(srcLineList):
+            sline = str(line).rstrip()
+            for eachKey in self._checkLogKeyList[:-1]:
+                if eachKey in sline and sline[-1] == "\"":
+                    sline               += ",\n"
+                    srcLineList[idx]    = sline
+                    bChanged            = True
+        if bChanged is True:
+            print('[#] 파일의 Json 구분자가 명확하지 않아 보정합니다')
+        return srcLineList, bChanged
+
+
     # JsonRead 를 하려 했는데, 파일의 괄호가 알맞게 작성되어있지 않는 경우에 자동 보정
     def correctionWorkForReadJson(self):
         if not self.convertFile:
@@ -304,15 +363,19 @@ class FileChecker:
 
         print(f'[#] Json read 를 위한 파일 보정 체크 : {self.convertFile}')
 
+        bChanged = False
         lineList = ""
         with open(self.convertFile, 'r', encoding=self.convertFormat) as rf:
             lineList = rf.readlines()
 
-        lastLine = lineList[-1].strip()
+        # 임시 보정
+        lineList, tmpChanged = self.checkJsonDelimiter(lineList)
+        bChanged |= tmpChanged
 
-        if  lastLine[-1] == ',':
-            lineList[-1] = lineList[-1].replace(',', ']]')
+        lineList, tmpChanged = self.checkFileBrackets(lineList)
+        bChanged |= tmpChanged
 
+        if bChanged is True:
             print(f'[#] \'{self.targetFile}\' 이 Json read 에 적합하지 않아 보정을 시도합니다.')
 
             try:
@@ -321,8 +384,10 @@ class FileChecker:
                         wf.write(line)
                 print('[v] 보정 완료.')
             except Exception:
-                print("[!] 보정 실패. 직접 메모장의 마지막 부분을 수정해 주세요. 괄호의 쌍이 맞아야 합니다.")
+                print("[!] 보정 실패.")
                 return False
+        else:
+            print("[#] 보정이 필요없는 파일입니다.")
 
         self.isDoneCorrect = True
         return True
@@ -363,7 +428,8 @@ class FileChecker:
 
     def __del__(self):
         if os.path.isfile(self.convertFile):
-            os.remove(self.convertFile)
+            # os.remove(self.convertFile)
+            pass
 
 
 # CompareProgram : FileCheck로 로그파일을 불러와서 실제 비교하는 클래스
@@ -372,6 +438,7 @@ class CompareProgram:
     def __init__(self, pgSignal:ProgressSignal) -> None:
         self.__dateTimeFormat       = DATETIME_FORMAT
         self.__matchCheckKeyList    = MATCH_CHECK_LIST
+        self.__keyDetailList        = CHECK_DETAIL_LIST
         self.__unmatchCountList     = [ 0 for _ in MATCH_CHECK_LIST ]
         self.__invalidVlaueCount    = 0
         self.__resultSaveDir        = RESULT_DIR
@@ -431,6 +498,15 @@ class CompareProgram:
     @matchCheckKeyList.setter
     def matchCheckKeyList(self, keyList:list):
         self.__matchCheckKeyList = keyList
+
+
+    @property
+    def keyDetailList(self):
+        return self.__keyDetailList
+
+    @keyDetailList.setter
+    def keyDetailList(self, detailList:list):
+        self.__keyDetailList = detailList
 
 
     @property
@@ -577,15 +653,15 @@ class CompareProgram:
     def RunFinish(self):
         self.progressSignal.sendStageFinish()
 
-    def setLogFiles(self, vFile=VIEWER_FILE, sFile=SERVER_FILE):
+    def setLogFiles(self, vFile=VIEWER_FILE, sFile=SERVER_FILE, logKeyList=MATCH_CHECK_LIST):
         self.InitRunStage(5)
         self.viewerOriginLogList.clear()
         self.serverOriginLogList.clear()
 
-        vf = FileChecker()
+        vf = FileChecker(logKeyList)
         self.viewerOriginLogList = vf.registerNewFile(vFile).readJsonFile()
 
-        sf = FileChecker()
+        sf = FileChecker(logKeyList)
         self.serverOriginLogList = sf.registerNewFile(sFile).readJsonFile()
 
         if not self.viewerOriginLogList:
@@ -911,6 +987,7 @@ class Ui_MainWindow(object):
 
         self.checkLogKeyLabel       = QLabel('로그 체크값')
         self.checkLogKeyLineEdit    = QLineEdit(', '.join(MATCH_CHECK_LIST))
+        self.checkLogKeyButton      = QPushButton('체크값 상세 설정')
 
         self.mid_V_Layout           = QVBoxLayout()
         self.mid_upper_H_Layout     = QHBoxLayout()
@@ -920,7 +997,8 @@ class Ui_MainWindow(object):
         self.mid_upper_H_Layout.addWidget(self.dateTimeFormatLineEdit, 4)
 
         self.mid_under_H_Layout.addWidget(self.checkLogKeyLabel, 2)
-        self.mid_under_H_Layout.addWidget(self.checkLogKeyLineEdit, 4)
+        self.mid_under_H_Layout.addWidget(self.checkLogKeyLineEdit, 3)
+        self.mid_under_H_Layout.addWidget(self.checkLogKeyButton, 1)
 
         self.mid_V_Layout.addLayout(self.mid_upper_H_Layout)
         self.mid_V_Layout.addLayout(self.mid_under_H_Layout)
@@ -929,6 +1007,7 @@ class Ui_MainWindow(object):
 
         self.dateTimeFormatLineEdit.setDisabled(True)
         self.checkLogKeyLineEdit.setDisabled(True)
+        self.checkLogKeyButton.setDisabled(True)
 
         # 중단 2
         self.priorityGroupBox       = QGroupBox('중복시 파일 비교 우선값', MainWindow)
@@ -1090,12 +1169,28 @@ class CompareProgramUI(QMainWindow):
 
     def onChangeLogKeyList(self, listString:str):
         if self.isValidLogKeyList(listString) is True:
+            prevKeyList = self.compareApp.matchCheckKeyList.copy()
+            prevDtlList = self.compareApp.keyDetailList.copy()
+
             self.ui.checkLogKeyLineEdit.setStyleSheet("color:black;")
             sList = listString.split(',')
             sList = [ each.strip() for each in sList ]
 
             self.compareApp.matchCheckKeyList = sList
             self.compareApp.unmatchCountList = [ 0 for _ in sList ]
+            
+            self.compareApp.keyDetailList.clear()
+            findIndex = -1
+            for i in range(len(sList)):
+                try:
+                    findIndex = prevKeyList.index(sList[i])
+                except:
+                    findIndex = -1
+                
+                if findIndex == -1:
+                    self.compareApp.keyDetailList.append(['str', 0])
+                else:
+                    self.compareApp.keyDetailList.append(prevDtlList[findIndex])
         else:
             self.ui.checkLogKeyLineEdit.setStyleSheet("color:red;")
         self.ui.RunButton.setDisabled(True)
@@ -1103,7 +1198,7 @@ class CompareProgramUI(QMainWindow):
 
     def checkFiles(self):
         self.TRACE()
-        if self.compareApp.setLogFiles(self.viewerLogPath, self.serverLogPath) is False:
+        if self.compareApp.setLogFiles(self.viewerLogPath, self.serverLogPath, self.compareApp.matchCheckKeyList) is False:
             self.TRACE("[!] 파일 유효성 체크가 실패했습니다. 로그 파일들을 다시 확인해 주세요.")
         else:
             self.TRACE("[v] 파일 유효성 체크 성공. Run 버튼이 활성화 됩니다.")
@@ -1121,11 +1216,13 @@ class CompareProgramUI(QMainWindow):
         if self.ui.fixSettingCheckBox.isChecked() is True:
             self.ui.dateTimeFormatLineEdit.setDisabled(True)
             self.ui.checkLogKeyLineEdit.setDisabled(True)
+            self.ui.checkLogKeyButton.setDisabled(True)
             self.ui.checkLogKeyLineEdit.setStyleSheet("color:grey;")
         else:
             color = 'black'
             self.ui.dateTimeFormatLineEdit.setEnabled(True)
             self.ui.checkLogKeyLineEdit.setEnabled(True)
+            self.ui.checkLogKeyButton.setEnabled(True)
             if self.isValidLogKeyList(self.ui.checkLogKeyLineEdit.text()) is False:
                 color = 'red'
             self.ui.checkLogKeyLineEdit.setStyleSheet(f"color:{color};")
@@ -1195,6 +1292,8 @@ class CompareProgramUI(QMainWindow):
         self.ui.fixSettingCheckBox.stateChanged.connect(self.onChangeFixSetting)
         self.pgSignal.signal.connect(self.updateProgressBar)
         self.DataExtractThread.finished.connect(self.onFinishDataExtractThread)
+
+        # TODO : 세부 설정 다이얼로그 만들고 연동하기
 
 
     def run(self):
