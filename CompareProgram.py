@@ -25,7 +25,7 @@ import  os
 import  sys
 import  shutil
 import  time
-from    datetime                import datetime, timedelta
+from    datetime                import datetime
 
 # Installed Library
 # -------------------------------------------------------------------
@@ -47,11 +47,6 @@ from    PyQt6.QtWidgets         import *
 FIRST = '최초값 우선'
 LAST  = '마지막값 우선'
 
-# 강제 종료 시나리오별 리턴 값
-EXIT_ERROR_NOT_SET_FILE  = 1
-EXIT_ERROR_DATE_TRANS    = 2
-EXIT_LOAD_FILE_FAIL      = 3
-
 # 텍스트 파일 불러올 때 유효한 인코딩 값
 VALID_ENCODING_FORMAT   = [ 'utf-8', 'ascii', 'ecu-kr', 'cp949' ]
 
@@ -59,22 +54,23 @@ VALID_ENCODING_FORMAT   = [ 'utf-8', 'ascii', 'ecu-kr', 'cp949' ]
 ENCODING_PREPIX         = 'ENC_'
 CUR_PATH                = os.path.dirname('./')
 
+# 인코딩 컨버트할 때 변환할 포맷
+CONVERT_ENCODING    = 'utf-8'
+
+# UI 창 크기
 WINDOW_WIDTH            = 800
 WINDOW_HEIGHT           = 650
 
-# Var Define
+# Var Define : UI 시작할 때 초기 세팅값이고, UI를 통해 변경 가능
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 # 중복값 매칭 우선순위
 DUPLICATE_PRIORITY  = FIRST
-
-# 인코딩 컨버트할 때 변환할 포맷
-CONVERT_ENCODING    = 'utf-8'
 
 # 기본 파일 경로들
 VIEWER_FILE         = './viewer.txt'
 SERVER_FILE         = './server.txt'
 RESULT_DIR          = CUR_PATH
-RESULT_FILE         = 'Result.txt'
+RESULT_FILE         = 'IOT_GPS_로그값_비교_결과.txt'
 
 # 매치 체크할 때 검사할 키값 목록
 MATCH_CHECK_LIST    = [ 'time', 'speed', 'bearing', 'latitude', 'longitude' ]
@@ -82,6 +78,43 @@ UNMATCH_COUNT_LIST  = [ 0 for _ in MATCH_CHECK_LIST ]
 
 # DateTime StringFormat
 DATETIME_FORMAT     = "%Y-%m-%d %H:%M:%S"
+
+
+# Common Use Class : Signal
+# -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+class ProgressSignal(QObject):
+    signal              = pyqtSignal(int)
+    addProgressCount    = 10
+    curProgress         = 0
+    isSetStage          = False
+
+    def sendProgress(self) -> None:
+        if self.isSetStage:
+            self.signal.emit(self.curProgress)
+
+    def initStage(self, stage:int):
+        self.curProgress = 0
+        self.isSetStage  = True
+
+        if stage < 1:
+            self.addProgressCount = 10
+        elif stage > 100:
+            self.addProgressCount = 1
+        else:
+            self.addProgressCount = 100 / stage
+
+    def sendPerStageClear(self):
+        self.curProgress += self.addProgressCount
+        self.sendProgress()
+
+    def sendStageFail(self):
+        self.curProgress = 0
+        self.sendProgress()
+        
+    def sendStageFinish(self):
+        self.curProgress = 100
+        self.sendProgress()
+        self.isSetStage  = False
 
 
 # FileChecker : FileCheck 및 인코딩 체크, 인코딩 변환 및 Json Read
@@ -95,7 +128,6 @@ class FileChecker:
         self.__convertFormat    = convert_encoding
         
         self.__isDoneCorrect    = False
-        self.__isValidJson      = False
         self.__newCorrectJson   = False
 
         self.__jsonObject       = None
@@ -113,7 +145,6 @@ class FileChecker:
             return
         self.__targetFile = fileName
 
-
     @property
     def targetFormat(self):
         return self.__targetFormat
@@ -125,7 +156,6 @@ class FileChecker:
             self.__targetFormat = None
             return
         self.__targetFormat = encodingFormat
-
 
     @property
     def convertFile(self):
@@ -143,7 +173,6 @@ class FileChecker:
             self.__convertFile = r""
             return
 
-
     @property
     def jsonObject(self):
         DATA_INDEX = 0
@@ -158,7 +187,6 @@ class FileChecker:
             print("[!] 유효하지 않은 방식으로 Json 파일이 입력되었습니다.")
             self.__jsonObject = None
 
-
     @property
     def isDoneCorrect(self):
         return self.__isDoneCorrect
@@ -167,16 +195,6 @@ class FileChecker:
     def isDoneCorrect(self, bVal:bool):
         self.__isDoneCorrect = bVal
 
-
-    @property
-    def isValidJson(self):
-        return self.__isValidJson
-
-    @isValidJson.setter
-    def isValidJson(self, bVal:bool):
-        self.__isValidJson = bVal
-
-
     @property
     def newCorrectJson(self):
         return self.__newCorrectJson
@@ -184,7 +202,6 @@ class FileChecker:
     @newCorrectJson.setter
     def newCorrectJson(self, bVal:bool):
         self.__newCorrectJson = bVal
-
 
     @property
     def convertFormat(self):
@@ -223,6 +240,9 @@ class FileChecker:
 
         # setter 정상적으로 완료되고, 인코딩 포맷까지 정상적으로 읽어졌을 때
         if self.targetFile == fileName and self.targetFormat:
+            # Reset Check Flags
+            self.isDoneCorrect  = False
+            self.newCorrectJson = False
             print(f'[v] 신규 체크파일 등록 - {fileName} ({self.targetFormat})')
 
         # 둘 중 하나라도 만족하지 못할 경우 롤백
@@ -237,7 +257,7 @@ class FileChecker:
     # targetFile 의 인코딩 포맷을 self.convertFormat 으로 변환하여 저장하는 함수
     def convertFileEncodingFormat(self):
         if not self.targetFile:
-            print('[!] 아직 파일을 등록하지 않았습니다. 파일을 등록해주세요.')
+            print('[!] 등록된 파일이 유효하지 않습니다.')
             return False
         
         if not self.targetFormat:
@@ -347,13 +367,15 @@ class FileChecker:
 # CompareProgram : FileCheck로 로그파일을 불러와서 실제 비교하는 클래스
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 class CompareProgram:
-    def __init__(self) -> None:
+    def __init__(self, pgSignal:ProgressSignal) -> None:
         self.__dateTimeFormat       = DATETIME_FORMAT
         self.__matchCheckKeyList    = MATCH_CHECK_LIST
         self.__unmatchCountList     = [ 0 for _ in MATCH_CHECK_LIST ]
         self.__invalidVlaueCount    = 0
         self.__resultSaveDir        = RESULT_DIR
         self.__dupPriority          = DUPLICATE_PRIORITY
+
+        self.progressSignal         = pgSignal
 
         self.__serverOriginLogList  = [] 
         self.__viewerOriginLogList  = []
@@ -531,8 +553,30 @@ class CompareProgram:
     def convertDateTimeToDateString(self, dateTime):
         return datetime.strftime(dateTime, self.dateTimeFormat)
 
+    def SendProgress(self, progress=0):
+        if 0 <= progress <= 100:
+            self.progressSignal.sendProgress(progress)
+        elif progress < 0:
+            self.progressSignal.sendProgress(0)
+        elif progress > 100:
+            self.progressSignal.sendProgress(100)
+
+    def InitRunStage(self, stage=1):
+        self.progressSignal.initStage(stage)
+
+    def RunFail(self, log=''):
+        print(log)
+        self.progressSignal.sendStageFail()
+        return False
+
+    def RunSuccess(self):
+        self.progressSignal.sendPerStageClear()
+
+    def RunFinish(self):
+        self.progressSignal.sendStageFinish()
 
     def setLogFiles(self, vFile=VIEWER_FILE, sFile=SERVER_FILE):
+        self.InitRunStage(5)
         self.viewerOriginLogList.clear()
         self.serverOriginLogList.clear()
 
@@ -543,12 +587,12 @@ class CompareProgram:
         self.serverOriginLogList = sf.registerNewFile(sFile).readJsonFile()
 
         if not self.viewerOriginLogList:
-            print("[!] 뷰어 로그 파일이 유효하지 않습니다.")
-            return False
+            return self.RunFail("[!] 뷰어 로그 파일이 유효하지 않습니다.")
+        self.RunSuccess()
 
         if not self.serverOriginLogList:
-            print("[!] 서버 로그 파일이 유효하지 않습니다.")
-            return False
+            return self.RunFail("[!] 서버 로그 파일이 유효하지 않습니다.")
+        self.RunSuccess()
 
         print()
         print('--------------------------------------------------------------')
@@ -556,12 +600,15 @@ class CompareProgram:
         print('--------------------------------------------------------------')
 
         if self.checkDateTimeFormatOK() is False:
-            return False
+            return self.RunFail()
+        self.RunSuccess()
 
         if self.checkKeyListOK() is False:
-            return False
+            return self.RunFail()
+        self.RunSuccess()
 
         self.setDateTimeList()
+        self.RunFinish()
         return True
 
     def checkDateTimeFormatOK(self):
@@ -615,6 +662,7 @@ class CompareProgram:
                 print(self.convertDateTimeToDateString(each))
             print('--------------------------------------------------------------')
         print()
+        self.RunSuccess()
 
 
     def findMissingLogCompareServerAndViewer(self):
@@ -640,6 +688,7 @@ class CompareProgram:
         print(f'[*] time 값 매칭된 로그 갯수 : {len(self.tmpMatchingList)}')
         print(f'[*] 매칭 누락된 로그 갯수 : {len(self.missingList)}')
         print('--------------------------------------------------------------')
+        self.RunSuccess()
 
 
     def makeCompareDictFromTmpMatchingList(self):
@@ -649,8 +698,7 @@ class CompareProgram:
         print('==============================================================')
 
         if not self.tmpMatchingList:
-            print('[!] 누락 체크 후 임시 매칭된 데이터 자료가 없습니다. 누락 체크를 하거나 로그 파일을 확인해주세요')
-            return False
+            return self.RunFail('[!] 누락 체크 후 임시 매칭된 데이터 자료가 없습니다. 누락 체크를 하거나 로그 파일을 확인해주세요')
 
         print(f'[*] Make Viewer Compare Data From tempMatchLogList :: {datetime.now()}')
         start = time.time()
@@ -666,6 +714,7 @@ class CompareProgram:
             progressMount += 1
             if progressMount >= addMountVal * progressPrcnt:
                 print(f'  [>] Data Processing... {progressPrcnt*10:3}%')
+                self.RunSuccess()
                 progressPrcnt += 1
 
             for eachDict in self.viewerOriginLogList:
@@ -690,6 +739,7 @@ class CompareProgram:
             progressMount += 1
             if progressMount >= addMountVal * progressPrcnt:
                 print(f'  [>] Data Processing... {progressPrcnt*10:3}%')
+                self.RunSuccess()
                 progressPrcnt += 1
 
             for eachDict in self.serverOriginLogList:
@@ -708,9 +758,6 @@ class CompareProgram:
 
 
     def compareLog(self):
-        if self.makeCompareDictFromTmpMatchingList() is False:
-            return
-
         finalRes = []
 
         print()
@@ -783,6 +830,8 @@ class CompareProgram:
         print('--------------------------------------------------------------')
         print()
 
+        self.RunFinish()
+
 
 # Ui_MainWindow Class (MainWindow)
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
@@ -797,6 +846,10 @@ class Ui_MainWindow(object):
         MainWindow.statusBar().showMessage(f'v{VERSION} ({UPDATE})')
 
         self.centralWidget          = QWidget(MainWindow)
+        self.statusBar              = QStatusBar()
+
+        MainWindow.setStatusBar(self.statusBar)
+        self.statusBar.setStatusTip(f'v{VERSION} ({UPDATE})')
 
         # 상단
         self.selectPathGroupBox     = QGroupBox('파일 및 폴더 선택', MainWindow)
@@ -895,6 +948,16 @@ class Ui_MainWindow(object):
         self.priorityFirstRButton.setChecked(True)
         self.fixSettingCheckBox.toggle()
 
+        # 진행바 그룹박스
+        self.progressGroupBox       = QGroupBox('진행 상황')
+        self.progress_H_Layout      = QHBoxLayout()
+        self.progressBar            = QProgressBar()
+        self.progress_H_Layout.addWidget(self.progressBar)
+        self.progressGroupBox.setLayout(self.progress_H_Layout)
+
+        self.progressBar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.progressBar.setValue(0)
+
         # 하단
         self.bot_H_Layout           = QHBoxLayout()
 
@@ -909,6 +972,7 @@ class Ui_MainWindow(object):
         self.mainLayout.addWidget(self.selectPathGroupBox, 1)
         self.mainLayout.addWidget(self.optionGroupBox, 1)
         self.mainLayout.addLayout(self.mid2_H_Layout, 1)
+        self.mainLayout.addWidget(self.progressGroupBox)
         self.mainLayout.addWidget(self.LogTextEdit, 5)
         self.mainLayout.addLayout(self.bot_H_Layout, 1)
 
@@ -927,7 +991,11 @@ class CompareProgramUI(QMainWindow):
         self.serverLogPath      = r""
         self.resultDir          = r""
 
-        self.compareApp         = CompareProgram()
+        self.pgSignal           = ProgressSignal()
+        self.compareApp         = CompareProgram(self.pgSignal)
+        self.DataExtractThread  = DataExtractThread(self)
+
+        self.threadRunSuccess   = False
 
         self.ui                 = Ui_MainWindow()
         self.ui.setupUi(self)
@@ -1042,7 +1110,10 @@ class CompareProgramUI(QMainWindow):
             self.ui.checkLogKeyLineEdit.setEnabled(True)
 
 
+    @pyqtSlot()
     def runCompProgram(self):
+        self.ui.RunButton.setDisabled(True)
+
         self.TRACE()
         self.TRACE("[#] 프로그램을 실행합니다.")
 
@@ -1052,15 +1123,35 @@ class CompareProgramUI(QMainWindow):
         self.TRACE(f"[i] 로그 체크값 : {self.compareApp.matchCheckKeyList}")
         self.TRACE()
 
+        self.compareApp.InitRunStage(1 + 1 + 10 + 10 + 1)
+
+        self.TRACE('[#] 중복값 체크 실행')
         self.compareApp.findDuplicateLogByServer()
+
+        self.TRACE('[#] 누락값 체크 실행')
         self.compareApp.findMissingLogCompareServerAndViewer()
-        self.compareApp.compareLog()
 
-        self.TRACE("[v] 프로그램 끝")
-        self.ui.RunButton.setDisabled(True)
+        self.TRACE('[#] 로그값 매칭 실행')
+        self.DataExtractThread.start()
 
-        if self.ui.openResultDirCheckBox.isChecked() is True:
-            os.startfile(self.compareApp.resultSaveDir)
+
+    @pyqtSlot(int)
+    def updateProgressBar(self, progressVal):
+        self.ui.progressBar.setValue(progressVal)
+
+    
+    @pyqtSlot()
+    def onFinishDataExtractThread(self):
+        if self.threadRunSuccess is True:
+            self.TRACE("[#] 데이터 정제가 끝나 비교를 시작합니다.")
+            self.compareApp.compareLog()
+            self.TRACE("[v] 프로그램 끝")
+
+            if self.ui.openResultDirCheckBox.isChecked() is True:
+                os.startfile(self.compareApp.resultSaveDir)
+
+        else:
+            self.compareApp.RunFail('[!] 데이터 정제가 실패하여 프로그램을 종료합니다..')
 
 
     def initialize(self):
@@ -1077,11 +1168,26 @@ class CompareProgramUI(QMainWindow):
         self.ui.RunButton.clicked.connect(self.runCompProgram)
 
         self.ui.fixSettingCheckBox.stateChanged.connect(self.onChangeFixSetting)
+        self.pgSignal.signal.connect(self.updateProgressBar)
+        self.DataExtractThread.finished.connect(self.onFinishDataExtractThread)
 
 
     def run(self):
         self.show()
         self.app.exec()
+
+
+# Common Use Class : PyQt Thread
+# -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+class DataExtractThread(QThread):
+    def __init__(self, parent:CompareProgramUI):
+        super().__init__(parent)
+        self.p      = parent
+        self.target = parent.compareApp
+
+    def run(self):
+        if self.target.makeCompareDictFromTmpMatchingList() is True:
+            self.p.threadRunSuccess = True
 
 
 if __name__ == "__main__":
