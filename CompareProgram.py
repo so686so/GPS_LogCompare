@@ -1,8 +1,8 @@
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*- #
 TITLE       = 'GPS Log Compare Program for GNET System'
-VERSION     = '1.0.1'
+VERSION     = '1.0.2'
 AUTHOR      = 'So Byung Jun'
-UPDATE      = '2022-6-15'
+UPDATE      = '2022-6-16'
 GIT_LINK    = 'https://github.com/so686so/GPS_LogCompare.git'
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*- #
 
