@@ -1236,31 +1236,7 @@ class CompareProgramUI(QMainWindow):
 
     # Not Use
     def onChangeLogKeyList(self, listString:str):
-        if self.isValidLogKeyList(listString) is True:
-            prevKeyList = self.compareApp.matchCheckKeyList.copy()
-            prevDtlList = self.compareApp.keyDetailList.copy()
-
-            self.ui.checkLogKeyLineEdit.setStyleSheet("color:black;")
-            sList = listString.split(',')
-            sList = [ each.strip() for each in sList ]
-
-            self.compareApp.matchCheckKeyList = sList
-            self.compareApp.unmatchCountList = [ 0 for _ in sList ]
-            
-            self.compareApp.keyDetailList.clear()
-            findIndex = -1
-            for i in range(len(sList)):
-                try:
-                    findIndex = prevKeyList.index(sList[i])
-                except:
-                    findIndex = -1
-                
-                if findIndex == -1:
-                    self.compareApp.keyDetailList.append(['str', 0])
-                else:
-                    self.compareApp.keyDetailList.append(prevDtlList[findIndex])
-        else:
-            self.ui.checkLogKeyLineEdit.setStyleSheet("color:red;")
+        self.TRACE(f'[>] {listString}')
         self.ui.RunButton.setDisabled(True)
 
 
@@ -1358,7 +1334,7 @@ class CompareProgramUI(QMainWindow):
         self.ui.resultDirButton.clicked.connect(self.selectResultDir)
 
         self.ui.dateTimeFormatLineEdit.textChanged[str].connect(self.onChangeDateFormat)
-        # self.ui.checkLogKeyLineEdit.textChanged[str].connect(self.onChangeLogKeyList)
+        self.ui.checkLogKeyLineEdit.textChanged[str].connect(self.onChangeLogKeyList)
 
         self.ui.FileCheckButton.clicked.connect(self.checkFiles)
         self.ui.RunButton.clicked.connect(self.runCompProgram)
