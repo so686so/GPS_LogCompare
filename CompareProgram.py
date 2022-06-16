@@ -1,6 +1,6 @@
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*- #
 TITLE       = 'GPS Log Compare Program for GNET System'
-VERSION     = '1.0.2'
+VERSION     = '1.0.3'
 AUTHOR      = 'So Byung Jun'
 UPDATE      = '2022-6-16'
 GIT_LINK    = 'https://github.com/so686so/GPS_LogCompare.git'
@@ -92,7 +92,7 @@ class ProgressSignal(QObject):
         if self.isSetStage:
             self.signal.emit(self.curProgress)
 
-    def initStage(self, stage:int):
+    def initStage(self, stage:int) -> None:
         self.curProgress = 0
         self.isSetStage  = True
 
@@ -101,15 +101,17 @@ class ProgressSignal(QObject):
         elif stage > 100:
             self.addProgressCount = 1
         else:
-            self.addProgressCount = 100 / stage
+            self.addProgressCount = (int)(100 / stage)
 
     def sendPerStageClear(self):
-        self.curProgress += self.addProgressCount
-        self.sendProgress()
+        if self.isSetStage:
+            self.curProgress += self.addProgressCount
+            self.sendProgress()
 
     def sendStageFail(self):
-        self.curProgress = 0
-        self.sendProgress()
+        if self.isSetStage:
+            self.curProgress = 0
+            self.sendProgress()
         
     def sendStageFinish(self):
         self.curProgress = 100
@@ -612,14 +614,24 @@ class CompareProgram:
         return True
 
     def checkDateTimeFormatOK(self):
+        currentFile     = 'ViewerLog'
+        currentLogTime  = ''
         try:
-            _ = self.convertDateStringToDateTime(self.serverOriginLogList[0]['time'])
+            for eachLog in self.viewerOriginLogList:
+                currentLogTime = eachLog['time']
+                _ = self.convertDateStringToDateTime(currentLogTime)    
+            currentFile = 'ServerLog'        
+            for eachLog in self.serverOriginLogList:
+                currentLogTime = eachLog['time']
+                _ = self.convertDateStringToDateTime(currentLogTime)
             return True
         except Exception:
             print()
             print('[!] 입력한 Time 형식이 유효하지 않습니다. 다시 입력해 주세요.')
+            print(f'[i] 오류 파일 : {currentFile}')
+            print(f'[i] 오류 Time 값: {currentLogTime}')
+            print(f'[i] 설정 Time 형식 : {self.dateTimeFormat}')
             return False
-
 
     def checkKeyListOK(self):
         errorPos = {}
@@ -698,7 +710,7 @@ class CompareProgram:
         print('==============================================================')
 
         if not self.tmpMatchingList:
-            return self.RunFail('[!] 누락 체크 후 임시 매칭된 데이터 자료가 없습니다. 누락 체크를 하거나 로그 파일을 확인해주세요')
+            return self.RunFail('[!] 누락 체크 후 임시 매칭된 데이터 자료가 없습니다. 로그 파일을 확인해주세요')
 
         print(f'[*] Make Viewer Compare Data From tempMatchLogList :: {datetime.now()}')
         start = time.time()
@@ -816,9 +828,7 @@ class CompareProgram:
 
         prcnt = round((allMatching / len(self.cmpViewerLogDict))*100, 2)
         print(f'- 모든 매칭 성공 로그 갯수 : {allMatching:6} / {len(self.cmpViewerLogDict):6} ( {prcnt:5} % )')
-
         print('--------------------------------------------------------------')
-
 
         resultFileFullPath = os.path.join(self.resultSaveDir, RESULT_FILE)
         
@@ -839,17 +849,16 @@ class Ui_MainWindow(object):
     def setupUi(self, MainWindow:QMainWindow):
         # 전체
         MainWindow.setObjectName('MainWindow')
-        MainWindow.setWindowTitle('GPS Log Compare Program')
+        MainWindow.setWindowTitle(f'GPS Log Compare Program / v{VERSION} ({UPDATE})')
 
         MainWindow.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
         MainWindow.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
-        MainWindow.statusBar().showMessage(f'v{VERSION} ({UPDATE})')
 
         self.centralWidget          = QWidget(MainWindow)
         self.statusBar              = QStatusBar()
 
         MainWindow.setStatusBar(self.statusBar)
-        self.statusBar.setStatusTip(f'v{VERSION} ({UPDATE})')
+        self.statusBar.showMessage(f'Made by {AUTHOR} :: Source - {GIT_LINK}')
 
         # 상단
         self.selectPathGroupBox     = QGroupBox('파일 및 폴더 선택', MainWindow)
@@ -1032,8 +1041,6 @@ class CompareProgramUI(QMainWindow):
         prePath     = self.ui.viewerLogPathLineEdit.text()
         targetFile  = QFileDialog.getOpenFileName(self, 'Select ViewerLog File', CUR_PATH)[0]
 
-        print(targetFile)
-
         if len(targetFile) == 0:
             targetFile = prePath
         else:
@@ -1047,8 +1054,6 @@ class CompareProgramUI(QMainWindow):
         prePath     = self.ui.serverLogPathLineEdit.text()
         targetFile  = QFileDialog.getOpenFileName(self, 'Select ServerLog File', CUR_PATH)[0]
 
-        print(targetFile)
-
         if len(targetFile) == 0:
             targetFile = prePath
         else:
@@ -1060,7 +1065,7 @@ class CompareProgramUI(QMainWindow):
 
     def selectResultDir(self):
         prePath     = self.ui.resultDirLineEdit.text()
-        targetDir   = QFileDialog.getExistingDirectory(self, 'Select Path', CUR_PATH)
+        targetDir   = QFileDialog.getExistingDirectory(self, 'Select Result Folder', CUR_PATH)
 
         if len(targetDir) == 0:
             targetDir = prePath
@@ -1071,17 +1076,28 @@ class CompareProgramUI(QMainWindow):
         self.resultDir = targetDir
 
 
+    def isValidLogKeyList(self, sListString:str):
+        checkString = sListString.strip()
+        if checkString[0] == ',' or checkString[-1] == ',':
+            return False
+        return True
+
+
     def onChangeDateFormat(self, txt:str):
         self.compareApp.dateTimeFormat = txt
         self.ui.RunButton.setDisabled(True)
 
 
     def onChangeLogKeyList(self, listString:str):
-        sList = listString.split(',')
-        sList = [ each.strip() for each in sList ]
+        if self.isValidLogKeyList(listString) is True:
+            self.ui.checkLogKeyLineEdit.setStyleSheet("color:black;")
+            sList = listString.split(',')
+            sList = [ each.strip() for each in sList ]
 
-        self.compareApp.matchCheckKeyList = sList
-        self.compareApp.unmatchCountList = [ 0 for _ in sList ]
+            self.compareApp.matchCheckKeyList = sList
+            self.compareApp.unmatchCountList = [ 0 for _ in sList ]
+        else:
+            self.ui.checkLogKeyLineEdit.setStyleSheet("color:red;")
         self.ui.RunButton.setDisabled(True)
 
 
@@ -1105,14 +1121,20 @@ class CompareProgramUI(QMainWindow):
         if self.ui.fixSettingCheckBox.isChecked() is True:
             self.ui.dateTimeFormatLineEdit.setDisabled(True)
             self.ui.checkLogKeyLineEdit.setDisabled(True)
+            self.ui.checkLogKeyLineEdit.setStyleSheet("color:grey;")
         else:
+            color = 'black'
             self.ui.dateTimeFormatLineEdit.setEnabled(True)
             self.ui.checkLogKeyLineEdit.setEnabled(True)
+            if self.isValidLogKeyList(self.ui.checkLogKeyLineEdit.text()) is False:
+                color = 'red'
+            self.ui.checkLogKeyLineEdit.setStyleSheet(f"color:{color};")
 
 
     @pyqtSlot()
     def runCompProgram(self):
         self.ui.RunButton.setDisabled(True)
+        self.ui.fixSettingCheckBox.setDisabled(True)
 
         self.TRACE()
         self.TRACE("[#] 프로그램을 실행합니다.")
@@ -1125,13 +1147,13 @@ class CompareProgramUI(QMainWindow):
 
         self.compareApp.InitRunStage(1 + 1 + 10 + 10 + 1)
 
-        self.TRACE('[#] 중복값 체크 실행')
+        self.TRACE(f'[#] 중복값 체크 실행 :: {datetime.now()}')
         self.compareApp.findDuplicateLogByServer()
 
-        self.TRACE('[#] 누락값 체크 실행')
+        self.TRACE(f'[#] 누락값 체크 실행 :: {datetime.now()}')
         self.compareApp.findMissingLogCompareServerAndViewer()
 
-        self.TRACE('[#] 로그값 매칭 실행')
+        self.TRACE(f'[#] 로그값 매칭 실행 :: {datetime.now()}')
         self.DataExtractThread.start()
 
 
@@ -1145,13 +1167,16 @@ class CompareProgramUI(QMainWindow):
         if self.threadRunSuccess is True:
             self.TRACE("[#] 데이터 정제가 끝나 비교를 시작합니다.")
             self.compareApp.compareLog()
-            self.TRACE("[v] 프로그램 끝")
+            self.TRACE(f"[v] 로그값 매칭 완료. 결과를 \'{os.path.join(self.resultDir, RESULT_FILE)}\' 에 저장했습니다.")
+            self.TRACE("[#] 프로그램의 실행이 완료되었습니다. 결과 파일을 확인해 주세요!")
+            self.TRACE()
 
             if self.ui.openResultDirCheckBox.isChecked() is True:
                 os.startfile(self.compareApp.resultSaveDir)
-
         else:
-            self.compareApp.RunFail('[!] 데이터 정제가 실패하여 프로그램을 종료합니다..')
+            self.compareApp.RunFail('[!] 데이터 정제가 실패하여 로그 매칭을 할 수 없습니다. 파일을 다시 확인해주세요.')
+
+        self.ui.fixSettingCheckBox.setEnabled(True)
 
 
     def initialize(self):
@@ -1186,6 +1211,7 @@ class DataExtractThread(QThread):
         self.target = parent.compareApp
 
     def run(self):
+        self.p.threadRunSuccess = False
         if self.target.makeCompareDictFromTmpMatchingList() is True:
             self.p.threadRunSuccess = True
 
