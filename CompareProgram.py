@@ -1,6 +1,6 @@
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*- #
 TITLE       = 'GPS Log Compare Program for GNET System'
-VERSION     = '1.0.3'
+VERSION     = '1.0.4'
 AUTHOR      = 'So Byung Jun'
 UPDATE      = '2022-6-16'
 GIT_LINK    = 'https://github.com/so686so/GPS_LogCompare.git'
@@ -23,8 +23,9 @@ GIT_LINK    = 'https://github.com/so686so/GPS_LogCompare.git'
 import  json
 import  os
 import  sys
-import  shutil
 import  time
+from    shutil                  import copyfile
+from    math                    import fabs
 from    datetime                import datetime
 
 # Installed Library
@@ -34,10 +35,9 @@ from    iteration_utilities     import unique_everseen, duplicates
 
 # For GUI ( Ver. PyQt 6.2.2 )
 # -------------------------------------------------------------------
-from    PyQt6                   import QtCore, QtGui, QtWidgets
-from    PyQt6.QtCore            import *
-from    PyQt6.QtGui             import *
-from    PyQt6.QtWidgets         import *
+from    PyQt5.QtCore            import *
+from    PyQt5.QtGui             import *
+from    PyQt5.QtWidgets         import *
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 
 
@@ -57,14 +57,28 @@ CUR_PATH                = os.path.dirname('./')
 # 인코딩 컨버트할 때 변환할 포맷
 CONVERT_ENCODING        = 'utf-8'
 
-# UI 창 크기
+# 모니터 해상도 못 불러왔을 때 기본 UI 창 크기
 WINDOW_WIDTH            = 800
 WINDOW_HEIGHT           = 650
 
+# 로그 텍스트 파일 형식에서 필요한 대괄호 [] 갯수
 NEED_BRACKET_COUNT      = 2
+
+# 각 로그 체크값을 문자열 그대로 할지, 숫자로 변환해 할지 타입 지정용 변수
+TYPE_STR                = 0
+TYPE_FLOAT              = 1
+TYPE_TABLE              = ['문자열 그대로', '숫자로 변환']
+
+# KEYLOG DLG Setting
+DLG_HEADER_LEN          = 2
+DLG_IDX_NAME            = 0
+DLG_IDX_TYPE            = 1
+
 
 # Var Define : UI 시작할 때 초기 세팅값이고, UI를 통해 변경 가능
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+DEBUG_MODE          = True
+
 # 중복값 매칭 우선순위
 DUPLICATE_PRIORITY  = FIRST
 
@@ -75,8 +89,8 @@ RESULT_DIR          = CUR_PATH
 RESULT_FILE         = 'IOT_GPS_로그값_비교_결과.txt'
 
 # 매치 체크할 때 검사할 키값 목록
-MATCH_CHECK_LIST    = [ 'time', 'speed', 'bearing', 'latitude', 'longitude', 'status' ]
-CHECK_DETAIL_LIST   = [ ['str', 0], ['float', 2], ['int', 0], ['float', 5], ['float', 5], ['str', 0] ]
+CHECK_DETAIL_LIST   = [ TYPE_STR, TYPE_FLOAT, TYPE_FLOAT, TYPE_FLOAT, TYPE_FLOAT,  TYPE_STR ]
+MATCH_CHECK_LIST    = [ 'time',   'speed',    'bearing',  'latitude', 'longitude', 'status' ]
 UNMATCH_COUNT_LIST  = [ 0 for _ in MATCH_CHECK_LIST ]
 
 # DateTime StringFormat
@@ -91,10 +105,12 @@ class ProgressSignal(QObject):
     curProgress         = 0
     isSetStage          = False
 
+    # 실제 시그널 보내는 함수
     def sendProgress(self) -> None:
         if self.isSetStage:
             self.signal.emit(self.curProgress)
 
+    # 해당 함수가 실행되어야지 스테이지별 진행 송신 가능
     def initStage(self, stage:int) -> None:
         self.curProgress = 0
         self.isSetStage  = True
@@ -106,11 +122,13 @@ class ProgressSignal(QObject):
         else:
             self.addProgressCount = (int)(100 / stage)
 
+    # 한 스테이지 클리어, initStage에서 정해둔 값만큼 progress 증가
     def sendPerStageClear(self):
         if self.isSetStage:
             self.curProgress += self.addProgressCount
             self.sendProgress()
 
+    # 진행 실패, 0으로 초기화
     def sendStageFail(self):
         if self.isSetStage:
             self.curProgress = 0
@@ -273,8 +291,9 @@ class FileChecker:
         baseName = os.path.basename(self.targetFile)
         destFile = f'./{ENCODING_PREPIX}{baseName}'
 
+        # 인코딩 포맷 동일하면 그냥 그대로 복사
         if self.targetFormat == self.convertFormat:
-            shutil.copyfile(self.targetFile, destFile)
+            copyfile(self.targetFile, destFile)
 
         elif self.targetFormat == 'ascii':
             blockSize = 256 * 256 * 16
@@ -321,7 +340,6 @@ class FileChecker:
         for eachChar in endString:
             if eachChar == ']':
                 endBracket += 1
-
 
         if startBracket != NEED_BRACKET_COUNT or endBracket != NEED_BRACKET_COUNT:
             print("[#] 파일의 괄호가 주어진 형식에 맞지 않아 보정합니다")
@@ -427,9 +445,8 @@ class FileChecker:
 
 
     def __del__(self):
-        if os.path.isfile(self.convertFile):
-            # os.remove(self.convertFile)
-            pass
+        if os.path.isfile(self.convertFile) and DEBUG_MODE is False:
+            os.remove(self.convertFile)
 
 
 # CompareProgram : FileCheck로 로그파일을 불러와서 실제 비교하는 클래스
@@ -478,7 +495,8 @@ class CompareProgram:
 
     @resultSaveDir.setter
     def resultSaveDir(self, resultDir:str):
-        self.__resultSaveDir = resultDir
+        if os.path.isdir(resultDir) is True:
+            self.__resultSaveDir = resultDir
 
 
     @property
@@ -506,7 +524,14 @@ class CompareProgram:
 
     @keyDetailList.setter
     def keyDetailList(self, detailList:list):
-        self.__keyDetailList = detailList
+        tList = []
+        for eachType in detailList:
+            if eachType not in [ TYPE_STR, TYPE_FLOAT ]:
+                print('[!] 유효하지 않은 로그키값 타입이 있습니다 : 문자열 타입으로 자동 보정')
+                tList.append(TYPE_STR)
+            else:
+                tList.append(eachType)
+        self.__keyDetailList = tList
 
 
     @property
@@ -681,7 +706,7 @@ class CompareProgram:
             return self.RunFail()
         self.RunSuccess()
 
-        if self.checkKeyListOK() is False:
+        if self.checkKeyNameOK() is False:
             return self.RunFail()
         self.RunSuccess()
 
@@ -709,7 +734,7 @@ class CompareProgram:
             print(f'[i] 설정 Time 형식 : {self.dateTimeFormat}')
             return False
 
-    def checkKeyListOK(self):
+    def checkKeyNameOK(self):
         errorPos = {}
         try:
             for eachDict in self.viewerOriginLogList:
@@ -721,7 +746,25 @@ class CompareProgram:
             print()
             print('[!] 입력한 로그 체크값 중 실제 뷰어 파일에 없는 체크값이 있습니다. 다시 입력해 주세요.')
             print(f'[!] 에러 위치 : {errorPos["time"]}')
-            return False        
+            return False
+
+    # Not Use Yet
+    def checkKeyTypeOK(self):
+        errorPos = {}
+        try:
+            for eachDict in self.viewerOriginLogList:
+                errorPos = eachDict
+                for idx, eachKey in enumerate(self.matchCheckKeyList):
+                    if self.keyDetailList[idx] == TYPE_STR:
+                        _ = str(errorPos[eachKey])
+                    else:
+                        _ = float(errorPos[eachKey])
+            return True
+        except Exception:
+            print()
+            print('[!] 입력한 로그 체크값 중 지정한 문자열/실수 변환을 할 수 없는 값이 있습니다')
+            print(f'[!] 에러 위치 : {errorPos["time"]}')
+            return False
 
     def setDateTimeList(self):
         self.serverDateTimeList.clear()
@@ -788,12 +831,13 @@ class CompareProgram:
         if not self.tmpMatchingList:
             return self.RunFail('[!] 누락 체크 후 임시 매칭된 데이터 자료가 없습니다. 로그 파일을 확인해주세요')
 
-        print(f'[*] Make Viewer Compare Data From tempMatchLogList :: {datetime.now()}')
+        print(f'[*] Make Viewer Compare Data From tempMatchLogList :: {datetime.strftime(datetime.now(), DATETIME_FORMAT)}')
+        print(f'[*] Try to matching \'{len(self.tmpMatchingList)} X {len(self.viewerOriginLogList)}\' Log Data')
         start = time.time()
 
         progressPrcnt = 1
         progressMount = 0
-        addMountVal   = len(self.tmpMatchingList) / 10
+        addMountVal   = len(self.tmpMatchingList) / 20
 
         tmpViewerDict = {}
         # Viewer
@@ -801,32 +845,34 @@ class CompareProgram:
             
             progressMount += 1
             if progressMount >= addMountVal * progressPrcnt:
-                print(f'  [>] Data Processing... {progressPrcnt*10:3}%')
+                print(f'  [>] Data Processing... {progressPrcnt*5:3}%')
                 self.RunSuccess()
                 progressPrcnt += 1
 
             for eachDict in self.viewerOriginLogList:
                 if eachDateString == eachDict['time']:
-                    if  self.dupPriority == FIRST and tmpViewerDict.get(eachDateString):
+                    if self.dupPriority == FIRST and tmpViewerDict.get(eachDateString):
                         continue
                     tmpViewerDict[eachDateString] = eachDict
+                    if self.dupPriority == FIRST:
+                        break
 
         print(f'[v] Make Viewer Compare Data Finish : {round(time.time() - start, 2)} sec')
-
         print('--------------------------------------------------------------')
-        print(f'[*] Make Server Compare Data From tempMatchLogList :: {datetime.now()}')
+        print(f'[*] Make Server Compare Data From tempMatchLogList :: {datetime.strftime(datetime.now(), DATETIME_FORMAT)}')
+        print(f'[*] Try to matching \'{len(self.tmpMatchingList)} X {len(self.serverOriginLogList)}\' Log Data')
         start = time.time()
 
         progressPrcnt = 1
         progressMount = 0
 
         tmpServerDict = {}
-        # Viewer
+        # Server
         for eachDateString in self.tmpMatchingList:
             
             progressMount += 1
             if progressMount >= addMountVal * progressPrcnt:
-                print(f'  [>] Data Processing... {progressPrcnt*10:3}%')
+                print(f'  [>] Data Processing... {progressPrcnt*5:3}%')
                 self.RunSuccess()
                 progressPrcnt += 1
 
@@ -835,6 +881,8 @@ class CompareProgram:
                     if self.dupPriority == FIRST and tmpServerDict.get(eachDateString):
                         continue
                     tmpServerDict[eachDateString] = eachDict
+                    if self.dupPriority == FIRST:
+                        break
 
         print(f'[v] Make Server Compare Data Finish : {round(time.time() - start, 2)} sec')
         print('--------------------------------------------------------------')
@@ -860,16 +908,28 @@ class CompareProgram:
             # MISSING
             if not self.cmpViewerLogDict.get(eachLog['time']):
                 finalRes.append(f'[MIS] {eachLog["time"]}')
-            # CHECK PARTIAL?
+            # CHECK PARTIAL
             else:
                 isUnmatched = False
                 unMatchStr  = ""
                 for idx, eachKey in enumerate(self.matchCheckKeyList):
                     try:
-                        if self.cmpViewerLogDict[eachLog['time']][eachKey] != self.cmpServerLogDict[eachLog['time']][eachKey]:
-                            isUnmatched = True
-                            unMatchStr  += f'/{eachKey}'
-                            self.unmatchCountList[idx] += 1
+                        # 문자열 비교
+                        if self.keyDetailList[idx] == TYPE_STR:
+                            if str(self.cmpViewerLogDict[eachLog['time']][eachKey]) != str(self.cmpServerLogDict[eachLog['time']][eachKey]):
+                                isUnmatched = True
+                                unMatchStr  += f'/{eachKey}'
+                                self.unmatchCountList[idx] += 1
+                        # 실수값 비교
+                        else:
+                            viewerNumVal = float(self.cmpViewerLogDict[eachLog['time']][eachKey])
+                            serverNumVal = float(self.cmpServerLogDict[eachLog['time']][eachKey])
+
+                            if fabs(viewerNumVal - serverNumVal) > sys.float_info.epsilon:
+                                isUnmatched = True
+                                unMatchStr  += f'/{eachKey}'
+                                self.unmatchCountList[idx] += 1
+
                     except Exception:
                         self.invalidVlaueCount += 1
                         finalRes.append(f'[INV/{eachKey}] {eachLog["time"]}')
@@ -900,7 +960,7 @@ class CompareProgram:
         print(f'- 체크값 자체가 없는 로그 갯수 : {self.invalidVlaueCount}')
         print('--------------------------------------------------------------')
         prcnt = round((len(self.cmpViewerLogDict) / len(self.viewerOriginLogList))*100, 2)
-        print(f'- 부분 매칭 성공 로그 갯수 : {len(self.cmpViewerLogDict):6} / {len(self.viewerOriginLogList):6} ( {prcnt:5} % )')
+        print(f'- Time 매칭 성공 로그 갯수 : {len(self.cmpViewerLogDict):6} / {len(self.viewerOriginLogList):6} ( {prcnt:5} % )')
 
         prcnt = round((allMatching / len(self.cmpViewerLogDict))*100, 2)
         print(f'- 모든 매칭 성공 로그 갯수 : {allMatching:6} / {len(self.cmpViewerLogDict):6} ( {prcnt:5} % )')
@@ -922,13 +982,17 @@ class CompareProgram:
 # Ui_MainWindow Class (MainWindow)
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
 class Ui_MainWindow(object):
+    def __init__(self, width, height) -> None:
+        self.width  = int(width)
+        self.height = int(height)
+
     def setupUi(self, MainWindow:QMainWindow):
         # 전체
         MainWindow.setObjectName('MainWindow')
         MainWindow.setWindowTitle(f'GPS Log Compare Program / v{VERSION} ({UPDATE})')
 
-        MainWindow.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
-        MainWindow.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
+        MainWindow.resize(self.width, self.height)
+        MainWindow.setFixedSize(self.width, self.height)
 
         self.centralWidget          = QWidget(MainWindow)
         self.statusBar              = QStatusBar()
@@ -956,16 +1020,16 @@ class Ui_MainWindow(object):
         self.top_mddle_H_Layout     = QHBoxLayout()
         self.top_under_H_Layout     = QHBoxLayout()
 
-        self.top_upper_H_Layout.addWidget(self.viewerLogPathLabel, 2)
-        self.top_upper_H_Layout.addWidget(self.viewerLogPathLineEdit, 3)
+        self.top_upper_H_Layout.addWidget(self.viewerLogPathLabel, 1)
+        self.top_upper_H_Layout.addWidget(self.viewerLogPathLineEdit, 4)
         self.top_upper_H_Layout.addWidget(self.viewerLogPathButton, 1)
 
-        self.top_mddle_H_Layout.addWidget(self.serverLogPathLabel, 2)
-        self.top_mddle_H_Layout.addWidget(self.serverLogPathLineEdit, 3)
+        self.top_mddle_H_Layout.addWidget(self.serverLogPathLabel, 1)
+        self.top_mddle_H_Layout.addWidget(self.serverLogPathLineEdit, 4)
         self.top_mddle_H_Layout.addWidget(self.serverLogPathButton, 1)
 
-        self.top_under_H_Layout.addWidget(self.resultDirLabel, 2)
-        self.top_under_H_Layout.addWidget(self.resultDirLineEdit, 3)
+        self.top_under_H_Layout.addWidget(self.resultDirLabel, 1)
+        self.top_under_H_Layout.addWidget(self.resultDirLineEdit, 4)
         self.top_under_H_Layout.addWidget(self.resultDirButton, 1)
 
         self.top_V_Layout.addLayout(self.top_upper_H_Layout)
@@ -987,17 +1051,17 @@ class Ui_MainWindow(object):
 
         self.checkLogKeyLabel       = QLabel('로그 체크값')
         self.checkLogKeyLineEdit    = QLineEdit(', '.join(MATCH_CHECK_LIST))
-        self.checkLogKeyButton      = QPushButton('체크값 상세 설정')
+        self.checkLogKeyButton      = QPushButton('Edit')
 
         self.mid_V_Layout           = QVBoxLayout()
         self.mid_upper_H_Layout     = QHBoxLayout()
         self.mid_under_H_Layout     = QHBoxLayout()
 
-        self.mid_upper_H_Layout.addWidget(self.dateTimeFormatLabel, 2)
-        self.mid_upper_H_Layout.addWidget(self.dateTimeFormatLineEdit, 4)
+        self.mid_upper_H_Layout.addWidget(self.dateTimeFormatLabel, 1)
+        self.mid_upper_H_Layout.addWidget(self.dateTimeFormatLineEdit, 5)
 
-        self.mid_under_H_Layout.addWidget(self.checkLogKeyLabel, 2)
-        self.mid_under_H_Layout.addWidget(self.checkLogKeyLineEdit, 3)
+        self.mid_under_H_Layout.addWidget(self.checkLogKeyLabel, 1)
+        self.mid_under_H_Layout.addWidget(self.checkLogKeyLineEdit, 4)
         self.mid_under_H_Layout.addWidget(self.checkLogKeyButton, 1)
 
         self.mid_V_Layout.addLayout(self.mid_upper_H_Layout)
@@ -1007,6 +1071,7 @@ class Ui_MainWindow(object):
 
         self.dateTimeFormatLineEdit.setDisabled(True)
         self.checkLogKeyLineEdit.setDisabled(True)
+        self.checkLogKeyLineEdit.setReadOnly(True)
         self.checkLogKeyButton.setDisabled(True)
 
         # 중단 2
@@ -1071,7 +1136,7 @@ class Ui_MainWindow(object):
 
 
 class CompareProgramUI(QMainWindow):
-    def __init__(self, QApp=None):
+    def __init__(self, QApp=None, width=WINDOW_WIDTH, height=WINDOW_HEIGHT):
         super().__init__()
         self.app                = QApp
 
@@ -1085,8 +1150,10 @@ class CompareProgramUI(QMainWindow):
 
         self.threadRunSuccess   = False
 
-        self.ui                 = Ui_MainWindow()
+        self.ui                 = Ui_MainWindow(width, height)
         self.ui.setupUi(self)
+
+        self.dlg                = LogKeySettingDlg(self.compareApp, width, height/2)
 
         self.initialize()
 
@@ -1167,6 +1234,7 @@ class CompareProgramUI(QMainWindow):
         self.ui.RunButton.setDisabled(True)
 
 
+    # Not Use
     def onChangeLogKeyList(self, listString:str):
         if self.isValidLogKeyList(listString) is True:
             prevKeyList = self.compareApp.matchCheckKeyList.copy()
@@ -1217,15 +1285,10 @@ class CompareProgramUI(QMainWindow):
             self.ui.dateTimeFormatLineEdit.setDisabled(True)
             self.ui.checkLogKeyLineEdit.setDisabled(True)
             self.ui.checkLogKeyButton.setDisabled(True)
-            self.ui.checkLogKeyLineEdit.setStyleSheet("color:grey;")
         else:
-            color = 'black'
             self.ui.dateTimeFormatLineEdit.setEnabled(True)
             self.ui.checkLogKeyLineEdit.setEnabled(True)
             self.ui.checkLogKeyButton.setEnabled(True)
-            if self.isValidLogKeyList(self.ui.checkLogKeyLineEdit.text()) is False:
-                color = 'red'
-            self.ui.checkLogKeyLineEdit.setStyleSheet(f"color:{color};")
 
 
     @pyqtSlot()
@@ -1242,7 +1305,7 @@ class CompareProgramUI(QMainWindow):
         self.TRACE(f"[i] 로그 체크값 : {self.compareApp.matchCheckKeyList}")
         self.TRACE()
 
-        self.compareApp.InitRunStage(1 + 1 + 10 + 10 + 1)
+        self.compareApp.InitRunStage(1 + 1 + 20 + 20 + 1)
 
         self.TRACE(f'[#] 중복값 체크 실행 :: {datetime.now()}')
         self.compareApp.findDuplicateLogByServer()
@@ -1276,6 +1339,17 @@ class CompareProgramUI(QMainWindow):
         self.ui.fixSettingCheckBox.setEnabled(True)
 
 
+    def openDlg(self):
+        self.dlg.setTableByParentData()
+        if self.dlg.exec_():
+            self.TRACE('[#] 로그 체크값 변경')
+            self.compareApp.matchCheckKeyList   = self.dlg.getDlgChangedKeyNameList()
+            self.compareApp.keyDetailList       = self.dlg.getDlgChangedKeyTypeList()
+            self.ui.checkLogKeyLineEdit.setText(', '.join(self.compareApp.matchCheckKeyList))
+        else:
+            self.TRACE('[#] 로그 체크값 변경 취소')
+
+
     def initialize(self):
         self.noticeHowToRun()
 
@@ -1284,7 +1358,7 @@ class CompareProgramUI(QMainWindow):
         self.ui.resultDirButton.clicked.connect(self.selectResultDir)
 
         self.ui.dateTimeFormatLineEdit.textChanged[str].connect(self.onChangeDateFormat)
-        self.ui.checkLogKeyLineEdit.textChanged[str].connect(self.onChangeLogKeyList)
+        # self.ui.checkLogKeyLineEdit.textChanged[str].connect(self.onChangeLogKeyList)
 
         self.ui.FileCheckButton.clicked.connect(self.checkFiles)
         self.ui.RunButton.clicked.connect(self.runCompProgram)
@@ -1293,12 +1367,149 @@ class CompareProgramUI(QMainWindow):
         self.pgSignal.signal.connect(self.updateProgressBar)
         self.DataExtractThread.finished.connect(self.onFinishDataExtractThread)
 
-        # TODO : 세부 설정 다이얼로그 만들고 연동하기
+        self.ui.checkLogKeyButton.clicked.connect(self.openDlg)
 
 
     def run(self):
         self.show()
         self.app.exec()
+
+
+# LogKeySettingTable Dialog
+# -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+class LogKeySettingDlg(QDialog):
+    def __init__(self, parent:CompareProgram, width, height):
+        super().__init__()
+
+        self.p          = parent
+        self._width     = int(width)
+        self._height    = int(height)
+        self._tableRows = self.getTableRowNumFromParent()
+
+        self.tmpKeyNameList = self.p.matchCheckKeyList.copy()
+        self.tmpKeyTypeList = self.p.keyDetailList.copy()
+
+        self.setupUI()
+
+
+    def setupUI(self):
+        self.resize(self._width, self._height)
+        self.setFixedSize(self._width, self._height)
+        self.setWindowTitle('로그 체크값 설정')
+
+        self.tableGroupBox  = QGroupBox('Setting Table')
+        self.keyTable       = QTableWidget()
+        self.tableLayout    = QHBoxLayout()
+        self.tableLayout.addWidget(self.keyTable)
+        self.tableGroupBox.setLayout(self.tableLayout)
+
+        self.addButton      = QPushButton('추가')
+        self.delButton      = QPushButton('제거')
+
+        self.OKButton       = QPushButton('확인')
+        self.CancelButton   = QPushButton('취소')
+
+        self.btn_upper_H_Layout = QHBoxLayout()
+        self.btn_under_H_Layout = QHBoxLayout()
+        self.btn_V_Layout       = QVBoxLayout()
+
+        self.btn_upper_H_Layout.addWidget(self.addButton)
+        self.btn_upper_H_Layout.addWidget(self.delButton)
+        self.btn_under_H_Layout.addWidget(self.OKButton)
+        self.btn_under_H_Layout.addWidget(self.CancelButton)
+
+        self.btn_V_Layout.addLayout(self.btn_upper_H_Layout)
+        self.btn_V_Layout.addLayout(self.btn_under_H_Layout)
+
+        self.MainLayout = QVBoxLayout()
+        self.MainLayout.addWidget(self.tableGroupBox, 5)
+        self.MainLayout.addLayout(self.btn_V_Layout, 1)
+
+        self.setLayout(self.MainLayout)
+
+        # Setting
+        self.keyTable.resize(self._width/2, self._height*0.75)
+        self.keyTable.setColumnCount(DLG_HEADER_LEN)
+        self.keyTable.setHorizontalHeaderLabels(['이름', '타입'])
+        self.keyTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+
+        self.setTableByParentData()
+
+        header = self.keyTable.horizontalHeader()
+        for col in range(header.count()):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            header.resizeSection(col, int(self._width * 0.4))
+
+        # Connect
+        self.delButton.clicked.connect(self.delEvent)
+        self.addButton.clicked.connect(self.addEvent)
+        self.OKButton.clicked.connect(self.accept)
+        self.CancelButton.clicked.connect(self.reject)
+
+    def setTableByParentData(self):
+        self._tableRows = self.getTableRowNumFromParent()
+
+        self.keyTable.clearContents()
+        self.keyTable.setRowCount(self._tableRows)
+
+        self.tmpKeyNameList = self.p.matchCheckKeyList.copy()
+        self.tmpKeyTypeList = self.p.keyDetailList.copy()
+
+        self.refresh()
+
+    def refresh(self):
+        for idxRow in range(self._tableRows):
+            self.keyTable.setCellWidget(idxRow, DLG_IDX_NAME, QLineEdit(self.tmpKeyNameList[idxRow]))
+            self.keyTable.setCellWidget(idxRow, DLG_IDX_TYPE, QComboBox())
+
+            self.keyTable.cellWidget(idxRow, DLG_IDX_TYPE).addItems(TYPE_TABLE)
+            self.keyTable.cellWidget(idxRow, DLG_IDX_TYPE).setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            self.keyTable.cellWidget(idxRow, DLG_IDX_TYPE).setCurrentIndex(self.tmpKeyTypeList[idxRow])
+
+    def getTableRowNumFromParent(self):
+        return len(self.p.matchCheckKeyList)
+
+    def getCurrentTableRows(self):
+        return self.keyTable.rowCount()
+
+    def delEvent(self):
+        selectRow = self.keyTable.currentRow()
+        reply = QMessageBox.question(self, 
+                                     '로그 체크값 삭제', 
+                                     f'정말로 체크값 \'{self.tmpKeyNameList[selectRow]}\'를 삭제하시겠습니까?',
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self.keyTable.removeRow(selectRow)
+            self.tmpKeyNameList.pop(selectRow)
+            self.tmpKeyTypeList.pop(selectRow)
+            self._tableRows -= 1
+            self.keyTable.setRowCount(self._tableRows)
+            self.refresh()
+
+    def addTableRowData(self, nameData:str):
+        self._tableRows += 1
+        self.keyTable.setRowCount(self._tableRows)
+        self.tmpKeyNameList.append(nameData)
+        self.tmpKeyTypeList.append(TYPE_STR)
+        self.refresh()
+
+    def addEvent(self):
+        name, ok = QInputDialog.getText(self, '로그 체크값 입력', '[New] 등록할 로그 체크값의 이름을 적어주세요 : ')
+        if ok:
+            self.addTableRowData(str(name))
+
+    def getDlgChangedKeyNameList(self):
+        resList = []
+        for eachRow in range(self.getCurrentTableRows()):
+            resList.append(str(self.keyTable.cellWidget(eachRow, DLG_IDX_NAME).text()))
+        return resList
+
+    def getDlgChangedKeyTypeList(self):
+        resList = []
+        for eachRow in range(self.getCurrentTableRows()):
+            resList.append(self.keyTable.cellWidget(eachRow, DLG_IDX_TYPE).currentIndex())
+        return resList            
 
 
 # Common Use Class : PyQt Thread
@@ -1317,5 +1528,6 @@ class DataExtractThread(QThread):
 
 if __name__ == "__main__":
     App             = QApplication(sys.argv)
-    CompApp         = CompareProgramUI(App)
+    ScreenSize      = App.desktop().screenGeometry()
+    CompApp         = CompareProgramUI(App, ScreenSize.width()*(1/4), ScreenSize.width()*(2/5))
     CompApp.run()
