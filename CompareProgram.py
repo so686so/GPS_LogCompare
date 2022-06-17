@@ -33,11 +33,18 @@ from    datetime                import datetime
 from    chardet                 import detect      
 from    iteration_utilities     import unique_everseen, duplicates
 
+USE_PYQT5 = False
+
 # For GUI ( Ver. PyQt 6.2.2 )
 # -------------------------------------------------------------------
-from    PyQt5.QtCore            import *
-from    PyQt5.QtGui             import *
-from    PyQt5.QtWidgets         import *
+if USE_PYQT5 is True:
+    from    PyQt5.QtCore            import *
+    from    PyQt5.QtGui             import *
+    from    PyQt5.QtWidgets         import *
+else:
+    from    PyQt6.QtCore            import *
+    from    PyQt6.QtGui             import *
+    from    PyQt6.QtWidgets         import *
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 
 
@@ -1246,6 +1253,12 @@ class CompareProgramUI(QMainWindow):
             self.TRACE("[!] 파일 유효성 체크가 실패했습니다. 로그 파일들을 다시 확인해 주세요.")
         else:
             self.TRACE("[v] 파일 유효성 체크 성공. Run 버튼이 활성화 됩니다.")
+            self.TRACE()
+            self.TRACE("-------------------------------------------------------------------")
+            self.TRACE(f'VIEWER LOG : {self.compareApp.viewerOriginLogList[0]["time"]} ~ {self.compareApp.viewerOriginLogList[-1]["time"]}')
+            self.TRACE(f'SERVER LOG : {self.compareApp.serverOriginLogList[0]["time"]} ~ {self.compareApp.serverOriginLogList[-1]["time"]}')
+            self.TRACE("-------------------------------------------------------------------")
+            self.TRACE()
             self.ui.RunButton.setEnabled(True)
 
 
@@ -1317,14 +1330,16 @@ class CompareProgramUI(QMainWindow):
 
     def openDlg(self):
         self.dlg.setTableByParentData()
-        if self.dlg.exec_():
+        self.dlg.show()
+
+    def accpetApply(self):
             self.TRACE('[#] 로그 체크값 변경')
             self.compareApp.matchCheckKeyList   = self.dlg.getDlgChangedKeyNameList()
             self.compareApp.keyDetailList       = self.dlg.getDlgChangedKeyTypeList()
             self.ui.checkLogKeyLineEdit.setText(', '.join(self.compareApp.matchCheckKeyList))
-        else:
-            self.TRACE('[#] 로그 체크값 변경 취소')
 
+    def rejectApply(self):
+        self.TRACE('[#] 로그 체크값 변경 취소')
 
     def initialize(self):
         self.noticeHowToRun()
@@ -1345,6 +1360,8 @@ class CompareProgramUI(QMainWindow):
 
         self.ui.checkLogKeyButton.clicked.connect(self.openDlg)
 
+        self.dlg.accepted.connect(self.accpetApply)
+        self.dlg.rejected.connect(self.rejectApply)
 
     def run(self):
         self.show()
@@ -1404,7 +1421,7 @@ class LogKeySettingDlg(QDialog):
         self.setLayout(self.MainLayout)
 
         # Setting
-        self.keyTable.resize(self._width/2, self._height*0.75)
+        self.keyTable.resize(int(self._width/2), int(self._height*0.75))
         self.keyTable.setColumnCount(DLG_HEADER_LEN)
         self.keyTable.setHorizontalHeaderLabels(['이름', '타입'])
         self.keyTable.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -1504,6 +1521,12 @@ class DataExtractThread(QThread):
 
 if __name__ == "__main__":
     App             = QApplication(sys.argv)
-    ScreenSize      = App.desktop().screenGeometry()
-    CompApp         = CompareProgramUI(App, ScreenSize.width()*(1/4), ScreenSize.width()*(2/5))
+    if USE_PYQT5 is True:
+        ScreenSize      = App.desktop().screenGeometry()
+        AppWidth        = ScreenSize.width()*(1/4)
+        AppHeight       = ScreenSize.width()*(2/5)
+    else:
+        AppWidth        = WINDOW_WIDTH
+        AppHeight       = WINDOW_HEIGHT
+    CompApp         = CompareProgramUI(App, AppWidth, AppHeight)
     CompApp.run()
