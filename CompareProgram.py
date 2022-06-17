@@ -33,18 +33,20 @@ from    datetime                import datetime
 from    chardet                 import detect      
 from    iteration_utilities     import unique_everseen, duplicates
 
-USE_PYQT5 = False
-
 # For GUI ( Ver. PyQt 6.2.2 )
 # -------------------------------------------------------------------
+USE_PYQT5 = False
+# -------------------------------------------------------------------
 if USE_PYQT5 is True:
-    from    PyQt5.QtCore            import *
-    from    PyQt5.QtGui             import *
-    from    PyQt5.QtWidgets         import *
+    # from    PyQt5.QtCore            import *
+    # from    PyQt5.QtGui             import *
+    # from    PyQt5.QtWidgets         import *
+    pass
 else:
     from    PyQt6.QtCore            import *
     from    PyQt6.QtGui             import *
     from    PyQt6.QtWidgets         import *
+    pass
 # -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 
 
